@@ -1,0 +1,32 @@
+.sidebar {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 80px;
+  height: 100vh;
+  background: #2C3E50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0;
+}
+
+.sidebar div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #ECF0F1;
+  cursor: pointer;
+  margin: 20px 0;
+  transition: color 0.2s;
+}
+
+.sidebar div:hover {
+  color: #1ABC9C;
+}
+
+.sidebar span {
+  font-size: 12px;
+  margin-top: 5px;
+}

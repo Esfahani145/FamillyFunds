@@ -1,0 +1,17 @@
+.admin-panel {
+  display: flex;
+}
+
+.main-content {
+  margin-right: 80px;
+  width: calc(100% - 80px);
+}
+
+.fund-info {
+  background: #1ABC9C;
+  color: white;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}

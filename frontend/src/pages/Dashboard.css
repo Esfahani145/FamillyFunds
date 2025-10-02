@@ -1,0 +1,11 @@
+.main-content {
+    padding: 20px;
+    direction: rtl;
+}
+
+.fund-card {
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}

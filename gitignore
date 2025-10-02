@@ -1,0 +1,17 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Node.js
+node_modules/
+
+# Build & logs
+dist/
+build/
+*.log
+.env
