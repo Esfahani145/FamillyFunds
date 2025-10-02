@@ -1,17 +1,19 @@
-# IDE
-.idea/
-.vscode/
-
-# Python
-__pycache__/
-*.pyc
+# Python / Django
 venv/
+*.pyc
+__pycache__/
+db.sqlite3
+/media/
 
-# Node.js
-node_modules/
+# Node / React
+frontend/node_modules/
+frontend/build/
+frontend/.cache/
+frontend/node_modules/.cache/
+frontend/node_modules/.cache/**
 
-# Build & logs
-dist/
-build/
-*.log
-.env
+# IDE / Editor
+.idea/
+
+# macOS
+.DS_Store

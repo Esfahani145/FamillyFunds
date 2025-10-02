@@ -61,29 +61,58 @@ class LoanViewSet(viewsets.ModelViewSet):
 class FundViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Fund.objects.all()
     serializer_class = FundSerializer
-    premission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['post'], permission_classes=[IsAdmin])
     def add_member(self, request, pk=None):
         fund = self.get_object()
         user_id = request.data.get('user_id')
+        if not user_id:
+            return Response({"error": "user_id الزامی است"}, status=400)
         try:
             user = User.objects.get(id=user_id)
-            fund.members.add(user)
-            return Response({'status': 'success'})
         except User.DoesNotExist:
-            return Response({"error": "user not found"}, status=400)
+            return Response({"error": "کاربر یافت نشد"}, status=404)
+        fund.members.add(user)
+        return Response({"status": "member added"})
 
-    @action(detail=True, methods=["post"])
+    @action(detail=True, methods=['post'], permission_classes=[IsAdmin])
     def remove_member(self, request, pk=None):
         fund = self.get_object()
         user_id = request.data.get("user_id")
+        if not user_id:
+            return Response({"error": "user_id الزامی است"}, status=400)
         try:
             user = User.objects.get(id=user_id)
-            fund.members.remove(user)
-            return Response({"status": "member removed"})
         except User.DoesNotExist:
-            return Response({"error": "user not found"}, status=400)
+            return Response({"error": "کاربر یافت نشد"}, status=404)
+        fund.members.remove(user)
+        return Response({"status": "member removed"})
+
+    # @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
+    # def members(self, request, pk=None):
+    #     fund = self.get_object()
+    #     members = fund.members.all()
+    #     data = [
+    #         {
+    #             "id": m.id,
+    #             "username": m.username,
+    #             "fullname": m.fullname,
+    #             "national_id": m.national_id,
+    #             "phone": m.phone,
+    #             "monthly_charge": m.monthly_charge,
+    #             "role": m.role,
+    #         }
+    #         for m in members
+    #     ]
+    #     return Response(data)
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        fund = self.get_object()
+        users = fund.members.all()
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data)
 
     def get_queryset(self):
         user = self.request.user
