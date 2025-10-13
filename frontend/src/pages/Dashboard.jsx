@@ -4,6 +4,7 @@ import Sidebar from "../components/Sidebar";
 import Profile from "./Profile";
 import Loans from './Loans';
 import './Dashboard.css';
+import Payments from "./Payments";
 
 export default function Dashboard() {
     const [me, setMem] = useState([]);
@@ -31,6 +32,8 @@ export default function Dashboard() {
                 return <Profile user={user}/>
             case 'loans' :
                 return <Loans/>
+            case 'payments':
+                return <Payments user={user}/>
             default :
                 return (
                     <div>

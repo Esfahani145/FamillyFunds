@@ -1,9 +1,6 @@
-import self
+from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.conf import settings
-import math
-
 
 
 class User(AbstractUser):
@@ -22,27 +19,35 @@ class Fund(models.Model):
     name = models.CharField(max_length=100)
     manager = models.ForeignKey(User, on_delete=models.CASCADE, related_name="managed_funds")
     balance = models.DecimalField(max_digits=15, decimal_places=2, default=0)
-    members = models.ManyToManyField(User, related_name="fund_members", blank=True)
+    members = models.ManyToManyField(User, through='Membership', related_name="fund_members")
+
     def __str__(self):
         return self.name
 
     @property
-    def manager_name(selfself):
+    def manager_name(self):
         return self.manager.fullname
 
 
 class Payment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'در انتظار تأیید'),
+        ('approved', 'تأیید شده'),
+        ('rejected', 'رد شده'),
+    ]
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE, blank=True, null=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     confirm_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     is_confirmed = models.BooleanField(default=False)
     admin_note = models.TextField(blank=True, null=True)
     user_note = models.TextField(blank=True, null=True)
     monthly_charge_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def __str__(self):
-        return f"{self.user.fullname} → {self.fund.name} ({self.amount})"
+        return f"{self.user.fullname} → {self.fund.name} ({self.amount}) ({self.status})"
 
 
 class Loan(models.Model):
@@ -87,3 +92,27 @@ class MonthlyCharge(models.Model):
 
     def __str__(self):
         return f"شارژ {self.amount} - ردیف {self.row_number}"
+
+
+class Membership(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    fund = models.ForeignKey(Fund, on_delete=models.CASCADE)
+    joined_at = models.DateField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "fund")
+
+    def __str__(self):
+        return f"{self.user.fullname} در {self.fund.name}"
+
+
+def calculate_due(user, fund):
+    try:
+        membership = Membership.objects.get(user=user, fund=fund)
+    except Membership.DoesNotExist:
+        return 0
+
+    today = timezone.now().date()
+    months = (today.year - membership.joined_at.year) * 12 + (today.month - membership.joined_at.month)
+
+    return months * (user.monthly_charge or 30000)

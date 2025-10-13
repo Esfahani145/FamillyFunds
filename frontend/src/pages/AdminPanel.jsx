@@ -11,28 +11,14 @@ export default function AdminPanel() {
     const [funds, setFunds] = useState([]);
     const [view, setView] = useState('dashboard');
     const [members, setMembers] = useState({});
-    const [newMemberId, setNewMemberId] = useState({});
+    const [newMember, setNewMember] = useState({   // ✅ اینجا تعریف شد
+        username: "",
+        fullname: "",
+        national_id: ""
+    });
+
     const user = JSON.parse(localStorage.getItem('user'));
     const userId = parseInt(user?.id);
-
-    useEffect(() => {
-        api.get('/payments/')
-            .then(r => setDeposits(r.data))
-            .catch(() => {
-            });
-
-        api.get('/funds/')
-            .then(r => {
-                if (Array.isArray(r.data)) {
-                    const filtered = r.data.filter(f => f.manager === userId);
-                    setFunds(filtered);
-
-                    filtered.forEach(f => loadMembers(f.id));
-                }
-            })
-            .catch(() => {
-            });
-    }, [userId]);
 
     const loadMembers = (fundId) => {
         api.get(`/funds/${fundId}/members/`)
@@ -41,12 +27,23 @@ export default function AdminPanel() {
     };
 
     const addMember = (fundId) => {
-        const uid = newMemberId[fundId];
-        if (!uid) return;
-        api.post(`/funds/${fundId}/add_member/`, {user_id: uid})
+        api.post(`/funds/${fundId}/add_member/`, {
+            username: newMember.username,
+            fullname: newMember.fullname,
+            national_id: newMember.national_id,
+            phone: newMember.phone,
+        })
             .then(() => {
+                setNewMember({username: "", fullname: "", national_id: "", phone: ""});
                 loadMembers(fundId);
-                setNewMemberId(prev => ({...prev, [fundId]: ''}));
+                alert("عضو جدید با موفقیت اضافه شد!");
+            })
+            .catch(err => {
+                if (err.response && err.response.data && err.response.data.error) {
+                    alert("خطا: " + err.response.data.error);
+                } else {
+                    alert("خطای شبکه یا ناشناخته رخ داد");
+                }
             });
     };
 
@@ -57,13 +54,30 @@ export default function AdminPanel() {
 
     const confirm = async (id) => {
         try {
-            await api.post(`/deposits/${id}/confirm/`, {});
+            await api.post(`/payments/${id}/confirm/`, {});  // ✅ مطمئن شو URL در backend همین باشه
             alert('تأیید شد');
             window.location.reload();
         } catch (e) {
             alert('خطا در تایید');
         }
     };
+
+    useEffect(() => {
+        api.get('/funds/')
+            .then(r => {
+                if (Array.isArray(r.data)) {
+                    const filtered = r.data.filter(f => f.manager === userId);
+                    setFunds(filtered);
+                    filtered.forEach(f => loadMembers(f.id));
+                }
+            })
+            .catch(console.error);
+
+        api.get('/payments/')
+            .then(r => setDeposits(r.data))
+            .catch(console.error);
+
+    }, [userId]);
 
     const renderContent = () => {
         if (view === 'profile') return <Profile/>;
@@ -89,25 +103,35 @@ export default function AdminPanel() {
                                 </li>
                             ))}
                         </ul>
+
                         <input
-                            type="number"
-                            placeholder="User ID"
-                            value={newMemberId[fund.id] || ''}
-                            onChange={e => setNewMemberId(prev => ({...prev, [fund.id]: e.target.value}))}
+                            type="text"
+                            placeholder="نام کاربری"
+                            value={newMember.username}
+                            onChange={e => setNewMember({...newMember, username: e.target.value})}
                         />
-                        <button onClick={() => addMember(fund.id)}>افزودن عضو</button>
+                        <input
+                            type="text"
+                            placeholder="نام کامل"
+                            value={newMember.fullname}
+                            onChange={e => setNewMember({...newMember, fullname: e.target.value})}
+                        />
+                        <input
+                            type="text"
+                            placeholder="کد ملی"
+                            value={newMember.national_id}
+                            onChange={e => setNewMember({...newMember, national_id: e.target.value})}
+                        />
+                        <input
+                            type="text"
+                            placeholder="شماره موبایل"
+                            value={newMember.phone || ""}
+                            onChange={e => setNewMember({...newMember, phone: e.target.value})}
+                        />
+
+                        <button onClick={() => addMember(fund.id)}>افزودن عضو جدید</button>
                     </div>
                 ))}
-
-                <h4>واریزها</h4>
-                <ul>
-                    {deposits.map(d => (
-                        <li key={d.id}>
-                            {d.user} - {d.amount} -{' '}
-                            {d.is_confirmed ? 'تأیید شده' : <button onClick={() => confirm(d.id)}>تأیید</button>}
-                        </li>
-                    ))}
-                </ul>
             </div>
         );
     };
