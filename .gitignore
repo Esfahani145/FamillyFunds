@@ -1,1 +1,27 @@
-"# Node / React" 
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.log
+
+# Django migrations (اختیاری)
+backend/core/migrations/
+
+# Node / React
+node_modules/
+build/
+dist/
+*.cache/
+*.pack
+*.old
+
+# Environment
+.env
+.env.local
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
