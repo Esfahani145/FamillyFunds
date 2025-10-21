@@ -99,6 +99,9 @@ class Membership(models.Model):
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE)
     joined_at = models.DateField(auto_now_add=True)
 
+    charge_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    loan_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     class Meta:
         unique_together = ("user", "fund")
 
@@ -106,13 +109,10 @@ class Membership(models.Model):
         return f"{self.user.fullname} در {self.fund.name}"
 
 
-def calculate_due(user, fund):
-    try:
-        membership = Membership.objects.get(user=user, fund=fund)
-    except Membership.DoesNotExist:
-        return 0
-
+def calculate_due(user, monthly_amount=30000):
     today = timezone.now().date()
-    months = (today.year - membership.joined_at.year) * 12 + (today.month - membership.joined_at.month)
+    start_date = user.join_date
+    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    total_due = months * monthly_amount
+    return max(0, total_due - user.monthly_charge)
 
-    return months * (user.monthly_charge or 30000)

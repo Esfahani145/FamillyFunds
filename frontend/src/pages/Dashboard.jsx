@@ -7,34 +7,41 @@ import './Dashboard.css';
 import Payments from "./Payments";
 
 export default function Dashboard() {
-    const [me, setMem] = useState([]);
     const [view, setView] = useState('home');
     const [user, setUser] = useState(null);
     const [funds, setFunds] = useState([]);
 
-    useEffect(() => {
-        api.get('/user/').then(res => setUser(res.data))
-            .catch(err => console.error(err));
-
+    const fetchFunds = () => {
         api.get('/funds/')
-            .then(res => {
-                if (Array.isArray(res.data)) {
-                    setFunds(res.data);
-                }
-            })
+            .then(res => Array.isArray(res.data) && setFunds(res.data))
             .catch(err => console.error(err));
-    }, []);
+    };
 
+    useEffect(() => {
+        api.get('/user/')
+            .then(res => setUser(res.data))
+            .catch(err => console.error(err));
+
+        fetchFunds();
+    }, []);
 
     const renderContent = () => {
         switch (view) {
-            case 'profile' :
-                return <Profile user={user}/>
-            case 'loans' :
-                return <Loans/>
+            case 'profile':
+                return <Profile user={user}/>;
+            case 'loans':
+                return <Loans/>;
             case 'payments':
-                return <Payments user={user}/>
-            default :
+                return user ? (
+                    <Payments user={user} onPaymentUpdate={() => {
+                        api.get('/funds/').then(res => {
+                            if (Array.isArray(res.data)) setFunds(res.data);
+                        });
+                    }}/>
+                ) : (
+                    <p>در حال بارگذاری...</p>
+                );
+            default:
                 return (
                     <div>
                         <h2>صندوق‌ها</h2>
@@ -43,7 +50,7 @@ export default function Dashboard() {
                             <div key={f.id} className="fund-card">
                                 <h3>{f.name}</h3>
                                 <p>موجودی: {f.balance.toLocaleString()} تومان</p>
-                                <p>شارژ ماهانه: {f.monthly_charge}</p>
+                                <p>شارژ ماهانه: {f.charge_due?.toLocaleString()} تومان</p>
                                 <button>درخواست وام</button>
                             </div>
                         ))}

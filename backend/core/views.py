@@ -2,11 +2,16 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from tinycss2 import serialize
+from decimal import Decimal
+from rest_framework import status
+from zmq.decorators import context
+
 from .permissions import IsAdminRole
 from rest_framework.permissions import IsAdminUser
 from . import models
-from .models import User, Loan, Payment, Fund, MonthlyCharge
-from .serializers import UserSerializer, PaymentSerializer, LoanSerializer, FundSerializer, MonthlyChargeSerializer
+from .models import User, Loan, Payment, Fund, MonthlyCharge, Membership
+from .serializers import UserSerializer, PaymentSerializer, LoanSerializer, FundSerializer, MonthlyChargeSerializer, \
+    FundMemberSerializer
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from django.contrib.auth import get_user_model
@@ -28,10 +33,22 @@ class UserViewSet(viewsets.ModelViewSet):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.role != 'admin':
+            return User.objects.filter(id=user.id)
+        return User.objects.all()
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
 
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user
@@ -42,34 +59,49 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-    def perform_update(self, serializer):
-        instance = serializer.save()
-        if instance.status == 'approved' and not instance.is_confirmed:
-            instance.is_confirmed = True
-            instance.confirm_date = timezone.now().date()
-            instance.user.monthly_charge = max(0, instance.user.monthly_charge - int(instance.amount))
-            instance.user.save()
-            instance.save()
-
-    @action(detail=True, methods=['post'], permission_classes=[IsAdmin])
-    def confirm(self, request, pk=None):
-        dep = self.get_object()
-        dep.manager_confirmed = True
-        dep.manager_note = request.data.get('manager_note', '')
-        dep.save()
-        return Response({'status': 'confirmed'})
-
     @action(detail=True, methods=['post'], permission_classes=[IsAdminRole])
     def approve(self, request, pk=None):
         payment = self.get_object()
-        if payment.status != "approved":
-            payment.status = "approved"
-            payment.is_confirmed = True
+
+        if payment.status != 'approved':
+            payment.status = 'approved'
             payment.confirm_date = timezone.now().date()
-            payment.user.monthly_charge = max(0, payment.user.monthly_charge - int(payment.amount))
-            payment.user.save()
+            payment.is_confirmed = True
             payment.save()
-        return Response({"status": "approved"})
+
+            user = payment.user
+            fund = payment.fund
+
+            membership = Membership.objects.filter(user=user, fund=fund).first()
+            if membership:
+                membership.charge_due = max(Decimal('0.00'), membership.charge_due - Decimal(payment.amount))
+                membership.save()
+                user.monthly_charge += int(payment.amount)
+                user.save()
+
+        return Response({'status': 'approved'})
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminRole])
+    def reject(self, request, pk=None):
+        payment = self.get_object()
+        reason = request.data.get('admin_note', '')
+
+        if payment.status == 'approved':
+            return Response({"error": "پرداخت قبلاً تأیید شده است."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        payment.status = 'rejected'
+        payment.admin_note = reason or "بدون توضیح"
+        payment.is_confirmed = True
+        payment.confirm_date = timezone.now().date()
+        payment.save()
+
+        return Response({
+            "message": "پرداخت رد شد",
+            "payment_id": payment.id,
+            "status": payment.status,
+            "admin_note": payment.admin_note,
+        }, status=status.HTTP_200_OK)
 
 
 class LoanViewSet(viewsets.ModelViewSet):
@@ -89,15 +121,16 @@ class LoanViewSet(viewsets.ModelViewSet):
         if not approved_amount:
             return Response({"error": "approved_amount الزامی است"}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            approved_amount = int(approved_amount)
-            loan.approve(approved_amount)
-            loan.save()
-            return Response(LoanSerializer(loan).data, status=status.HTTP_200_OK)
-        except ValueError:
-            return Response({"error": "مقدار باید عددی باشد"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": f"خطای ناشناخته: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        approved_amount = int(approved_amount)
+        loan.approve(approved_amount)
+        loan.save()
+
+        membership = Membership.objects.filter(user=loan.user, fund=loan.fund).first()
+        if membership:
+            membership.loan_due += approved_amount
+            membership.save()
+
+        return Response(LoanSerializer(loan).data, status=status.HTTP_200_OK)
 
 
 class FundViewSet(viewsets.ReadOnlyModelViewSet):
@@ -112,7 +145,7 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
 
         national_id = data.get("national_id")
         fullname = data.get("fullname")
-        username = data.get("username", "")  # خالی هم باشه مشکلی نیست
+        username = data.get("username", "")
         phone = data.get("phone", "")
 
         if not national_id or not fullname:
@@ -130,7 +163,7 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
             user = User.objects.create(
                 national_id=national_id,
                 fullname=fullname,
-                username=username or f"user_{national_id}",  # اگر خالی بود، یک مقدار پیش‌فرض بساز
+                username=username or f"user_{national_id}",
                 phone=phone,
                 role="member",
                 date_joined=timezone.now(),
@@ -172,11 +205,11 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
         except Exception as e:
             return Response({"error": f"خطای ناشناخته: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def members(self, request, pk=None):
         fund = self.get_object()
-        users = fund.members.all()
-        serializer = UserSerializer(users, many=True)
+        members = fund.members.all()
+        serializer = FundMemberSerializer(members, many=True, context={"fund": fund, "request": request})
         return Response(serializer.data)
 
     def get_queryset(self):
@@ -184,6 +217,15 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
         if user.role == 'admin':
             return Fund.objects.all()
         return Fund.objects.filter(Q(manager=user) | Q(members=user)).distinct()
+
+    def get_serializer(self, *args, **kwargs):
+        kwargs['context'] = self.get_serializer_context()
+        return super().get_serializer(*args, **kwargs)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
 
 class MonthlyChargeViewSet(viewsets.ModelViewSet):
@@ -195,7 +237,11 @@ class MonthlyChargeViewSet(viewsets.ModelViewSet):
 @permission_classes([IsAuthenticated])
 def user_info(request):
     return Response({
-        "username": request.user.username,
-        "role": request.user.role,
         "id": request.user.id,
+        "username": request.user.username,
+        "fullname": request.user.fullname,
+        "email": request.user.email,
+        "phone": request.user.phone,
+        "role": request.user.role,
+        "join_date": request.user.join_date,
     })
