@@ -25,27 +25,31 @@ export default function Profile() {
     const fetchUser = async () => {
         try {
             const res = await api.get("/user/");
-            setUser(res.data);
+            const currentUser = res.data;  // ← ذخیره کاربر فعلی
+            setUser(currentUser);
             setForm({
-                username: res.data.username || "",
-                email: res.data.email || "",
-                phone: res.data.phone || "",
-                fullname: res.data.fullname || "",
+                username: currentUser.username || "",
+                email: currentUser.email || "",
+                phone: currentUser.phone || "",
+                fullname: currentUser.fullname || "",
                 password: "",
                 password_confirm: "",
             });
-            fetchFunds(res.data.role);
+            fetchFunds(currentUser.role, currentUser); // ← حتما currentUser بده
         } catch (err) {
             console.error("fetchUser error:", err);
         }
     };
 
-    const fetchFunds = async (role) => {
+    const fetchFunds = async (role, currentUser) => {
         try {
             const res = await api.get("/funds/");
             if (Array.isArray(res.data)) {
+                // res.data شامل charge_due و loan_due است
                 setFunds(res.data);
+
                 if (role === "admin" || role === "مدیر") {
+                    // فقط برای نمایش اعضا
                     res.data.forEach((fund) => loadMembers(fund.id));
                 }
             }

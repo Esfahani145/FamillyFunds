@@ -76,7 +76,7 @@ class FundSerializer(serializers.ModelSerializer):
     members = UserSerializer(many=True, read_only=True)
     charge_due = serializers.SerializerMethodField()
     loan_due = serializers.SerializerMethodField()
-    user_monthly_charge = serializers.SerializerMethodField()  # این فیلد
+    user_monthly_charge = serializers.SerializerMethodField()
 
     class Meta:
         model = Fund
@@ -86,24 +86,18 @@ class FundSerializer(serializers.ModelSerializer):
         ]
 
     def get_charge_due(self, obj):
-        fund = self.context.get("fund")
-        if not fund:
-            return 0
-        membership = Membership.objects.filter(user=obj, fund=fund).first()
-        return membership.charge_due if membership else 0
+        user = self.context['request'].user
+        return calculate_due(user, fund=obj, monthly_amount=30000)
 
     def get_loan_due(self, obj):
-        request = self.context.get("request")
-        fund = self.context.get("fund")  # ← از context بگیر
-        if not fund or not request:
-            return 0
-
-        loans = Loan.objects.filter(user=obj, fund=fund, is_approved=True)
+        user = self.context['request'].user
+        loans = Loan.objects.filter(user=user, fund=obj, is_approved=True)
         return sum(loan.remaining_amount for loan in loans)
 
-    def get_user_monthly_charge(self, obj):  # ← این متد باید اضافه باشه
+    def get_user_monthly_charge(self, obj):
         user = self.context['request'].user
-        return calculate_due(user)
+        return calculate_due(user, fund=obj, monthly_amount=3000)
+
 
 
 class FundMemberSerializer(serializers.ModelSerializer):
@@ -119,15 +113,13 @@ class FundMemberSerializer(serializers.ModelSerializer):
         fund = self.context.get("fund")
         if not fund:
             return 0
-        membership = Membership.objects.filter(user=obj, fund=fund).first()
-        return membership.charge_due if membership else 0
+        return calculate_due(obj, fund=fund, monthly_amount=3000)
 
     def get_loan_due(self, obj):
-        request = self.context.get("request")
-        fund = self.context.get("fund")  # ← از context بگیر
-        if not fund or not request:
+        """بدهی وام هر عضو"""
+        fund = self.context.get("fund")
+        if not fund:
             return 0
-
         loans = Loan.objects.filter(user=obj, fund=fund, is_approved=True)
         return sum(loan.remaining_amount for loan in loans)
 

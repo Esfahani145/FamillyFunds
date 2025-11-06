@@ -5,7 +5,6 @@ from tinycss2 import serialize
 from decimal import Decimal
 from rest_framework import status
 from zmq.decorators import context
-
 from .permissions import IsAdminRole
 from rest_framework.permissions import IsAdminUser
 from . import models
@@ -63,22 +62,46 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def approve(self, request, pk=None):
         payment = self.get_object()
 
-        if payment.status != 'approved':
-            payment.status = 'approved'
-            payment.confirm_date = timezone.now().date()
-            payment.is_confirmed = True
-            payment.save()
+        if payment.status == 'approved':
+            return Response({"error": "پرداخت قبلاً تأیید شده است."}, status=status.HTTP_400_BAD_REQUEST)
 
-            user = payment.user
-            fund = payment.fund
+        payment.status = 'approved'
+        payment.is_confirmed = True
+        payment.confirm_date = timezone.now()
+        payment.save()
 
+        user = payment.user
+        fund = payment.fund
+
+        # # تشخیص نوع پرداخت: وام یا شارژ
+        # if "وام" in (payment.user_note or ""):
+        #     # اضافه کردن مبلغ وام به موجودی کاربر
+        #     user.balance += Decimal(payment.amount)
+        #
+        #     # اگر عضوی از صندوق است، بدهی وام در عضویت اضافه می‌شود
+        #     membership = Membership.objects.filter(user=user, fund=fund).first()
+        #     if membership:
+        #         membership.loan_due += Decimal(payment.amount)
+        #         membership.save()
+        # else:
+        #     # پرداخت شارژ: بدهی شارژ کم می‌شود
+        #     membership = Membership.objects.filter(user=user, fund=fund).first()
+        #     if membership:
+        #         membership.charge_due = max(Decimal('0.00'), membership.charge_due - Decimal(payment.amount))
+        #         membership.save()
+
+        if "وام" in (payment.user_note or ""):
+            # وام
+            user.balance += Decimal(payment.amount)
             membership = Membership.objects.filter(user=user, fund=fund).first()
             if membership:
-                membership.charge_due = max(Decimal('0.00'), membership.charge_due - Decimal(payment.amount))
+                membership.loan_due += Decimal(payment.amount)
                 membership.save()
-                user.monthly_charge += int(payment.amount)
-                user.save()
+        else:
+            # پرداخت شارژ: فقط ذخیره payment کافیست
+            pass
 
+        user.save()
         return Response({'status': 'approved'})
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminRole])
@@ -107,6 +130,19 @@ class PaymentViewSet(viewsets.ModelViewSet):
 class LoanViewSet(viewsets.ModelViewSet):
     queryset = Loan.objects.all().order_by('-created_at')
     serializer_class = LoanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        loan = serializer.save(user=self.request.user)
+
+        Payment.objects.create(
+            user=self.request.user,
+            fund=loan.fund,
+            amount=loan.requested_amount,
+            status='pending',
+            is_confirmed=False,
+            user_note=f"درخواست وام به مبلغ {loan.requested_amount:,} تومان",
+        )
 
     def get_permissions(self):
         if self.action in ['approve']:
@@ -121,14 +157,30 @@ class LoanViewSet(viewsets.ModelViewSet):
         if not approved_amount:
             return Response({"error": "approved_amount الزامی است"}, status=status.HTTP_400_BAD_REQUEST)
 
-        approved_amount = int(approved_amount)
-        loan.approve(approved_amount)
+        approved_amount = Decimal(approved_amount)
+        loan.approved_amount = approved_amount
+        loan.is_approved = True
+        loan.confirm_date = timezone.now()
         loan.save()
+
+        payment = Payment.objects.filter(
+            user=loan.user, fund=loan.fund, status='pending'
+        ).order_by('-created_at').first()
+
+        if payment:
+            payment.status = 'approved'
+            payment.is_confirmed = True
+            payment.admin_note = "درخواست وام تأیید شد ✅"
+            payment.confirm_date = timezone.now()
+            payment.save()
 
         membership = Membership.objects.filter(user=loan.user, fund=loan.fund).first()
         if membership:
             membership.loan_due += approved_amount
             membership.save()
+
+        loan.user.balance += approved_amount
+        loan.user.save()
 
         return Response(LoanSerializer(loan).data, status=status.HTTP_200_OK)
 
@@ -139,10 +191,10 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
 
     @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'])
     def add_member(self, request, pk=None):
         fund = self.get_object()
         data = request.data
-
         national_id = data.get("national_id")
         fullname = data.get("fullname")
         username = data.get("username", "")
@@ -155,26 +207,36 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         try:
+            # جلوگیری از تکرار کاربر با همان کد ملی
             if User.objects.filter(national_id=national_id).exists():
-                return Response(
-                    {"error": "کاربری با این کد ملی قبلاً ثبت شده است."},
-                    status=status.HTTP_400_BAD_REQUEST
+                user = User.objects.get(national_id=national_id)
+            else:
+                user = User.objects.create(
+                    national_id=national_id,
+                    fullname=fullname,
+                    username=username or f"user_{national_id}",
+                    phone=phone,
+                    role="member",
+                    date_joined=timezone.now(),
                 )
-            user = User.objects.create(
-                national_id=national_id,
-                fullname=fullname,
-                username=username or f"user_{national_id}",
-                phone=phone,
-                role="member",
-                date_joined=timezone.now(),
-            )
-            user.set_password(national_id)
-            user.save()
+                user.set_password(national_id)
+                user.save()
+
+            # اضافه کردن به صندوق
             fund.members.add(user)
+
+            # ایجاد یا به‌روزرسانی عضویت در صندوق
+            membership, created = Membership.objects.get_or_create(
+                user=user,
+                fund=fund,
+                defaults={"joined_at": timezone.now().date()}
+            )
+
             return Response({
                 "status": "success",
-                "message": "عضو جدید ساخته و اضافه شد",
-                "user": UserSerializer(user).data
+                "message": "عضو جدید با موفقیت اضافه شد.",
+                "user": UserSerializer(user).data,
+                "joined_at": membership.joined_at
             }, status=status.HTTP_201_CREATED)
 
         except IntegrityError as e:
@@ -210,6 +272,9 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
         fund = self.get_object()
         members = fund.members.all()
         serializer = FundMemberSerializer(members, many=True, context={"fund": fund, "request": request})
+        serializer = FundMemberSerializer(
+            members, many=True, context={"fund": fund, "request": request}
+        )
         return Response(serializer.data)
 
     def get_queryset(self):
@@ -225,6 +290,7 @@ class FundViewSet(viewsets.ReadOnlyModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
+        context['with_due'] = True
         return context
 
 
@@ -236,6 +302,8 @@ class MonthlyChargeViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_info(request):
+    membership = Membership.objects.filter(user=request.user).order_by("joined_at").first()
+    join_date = membership.joined_at if membership else request.user.date_joined
     return Response({
         "id": request.user.id,
         "username": request.user.username,
@@ -243,5 +311,21 @@ def user_info(request):
         "email": request.user.email,
         "phone": request.user.phone,
         "role": request.user.role,
-        "join_date": request.user.join_date,
+        "join_date": join_date,
     })
+
+
+def approve_payment(self, request, pk=None):
+    payment = self.get_object()
+    payment.status = "approved"
+    payment.is_confirmed = True
+    payment.confirm_date = timezone.now()
+    payment.save()
+
+    loan = Loan.objects.filter(user=payment.user, fund=payment.fund, is_approved=False).last()
+    if loan:
+        loan.is_approved = True
+        loan.confirm_date = timezone.now()
+        loan.save()
+
+    return Response({"detail": "پرداخت (و در صورت وجود وام) تأیید شد"})

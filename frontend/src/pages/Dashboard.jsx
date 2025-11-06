@@ -17,6 +17,30 @@ export default function Dashboard() {
             .catch(err => console.error(err));
     };
 
+    const requestLoan = async (fundId) => {
+        try {
+            if (!user) return alert("ابتدا وارد حساب شوید.");
+
+            const amount = prompt("مبلغ وام را وارد کنید (تومان):");
+            if (!amount || isNaN(amount)) return alert("عدد معتبر وارد کنید.");
+
+            await api.post("/loans/", {
+                fund: fundId,
+                user: user.id,
+                requested_amount: parseInt(amount),
+                amount: parseInt(amount),
+            });
+
+
+            alert("✅ درخواست وام با موفقیت ثبت شد");
+            fetchFunds();
+        } catch (err) {
+            console.error("Loan request error:", err.response?.data || err);
+            alert("❌ خطا در ثبت درخواست وام");
+        }
+    };
+
+
     useEffect(() => {
         api.get('/user/')
             .then(res => setUser(res.data))
@@ -51,7 +75,9 @@ export default function Dashboard() {
                                 <h3>{f.name}</h3>
                                 <p>موجودی: {f.balance.toLocaleString()} تومان</p>
                                 <p>شارژ ماهانه: {f.charge_due?.toLocaleString()} تومان</p>
-                                <button>درخواست وام</button>
+                                {user?.role !== "admin" && (
+                                    <button onClick={() => requestLoan(f.id)}>درخواست وام</button>
+                                )}
                             </div>
                         ))}
                     </div>

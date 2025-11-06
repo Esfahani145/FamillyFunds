@@ -1,7 +1,11 @@
+from decimal import Decimal
+from turtledemo.penrose import start
+
 from django.utils import timezone
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-
+from datetime import date
+# from .models import Payment, Membership
 
 class User(AbstractUser):
     national_id = models.CharField(max_length=10, unique=True)
@@ -97,7 +101,7 @@ class MonthlyCharge(models.Model):
 class Membership(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE)
-    joined_at = models.DateField(auto_now_add=True)
+    joined_at = models.DateField(default=timezone.now)
 
     charge_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     loan_due = models.DecimalField(max_digits=12, decimal_places=2, default=0)
@@ -109,10 +113,28 @@ class Membership(models.Model):
         return f"{self.user.fullname} در {self.fund.name}"
 
 
-def calculate_due(user, monthly_amount=30000):
+def calculate_due(user, fund=None, monthly_amount=30000):
     today = timezone.now().date()
-    start_date = user.join_date
-    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
-    total_due = months * monthly_amount
-    return max(0, total_due - user.monthly_charge)
 
+    # تاریخ شروع عضویت
+    if fund:
+        membership = Membership.objects.filter(user=user, fund=fund).first()
+        start_date = membership.joined_at if membership else user.join_date
+    else:
+        start_date = user.join_date
+
+    # تعداد ماه‌های گذشته
+    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
+    if today.day < start_date.day:
+        months -= 1
+
+    total_due = months * monthly_amount
+
+    # کل پرداخت‌های تایید شده برای شارژ در این صندوق
+    paid_charges = Payment.objects.filter(
+        user=user,
+        fund=fund,
+        status='approved'
+    ).exclude(user_note__icontains='وام').aggregate(total=models.Sum('amount'))['total'] or 0
+
+    return max(0, total_due - Decimal(paid_charges))
